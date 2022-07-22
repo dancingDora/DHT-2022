@@ -35,7 +35,7 @@ func forceQuitTest() (bool, int, int) {
 	}
 	time.Sleep(forceQuitAfterRunSleepTime)
 
-	/* Node 0 creates a new network. All notes join the network. */
+	/* Node 0 creates a new network. All note   s join the network. */
 	joinInfo := testInfo{
 		msg:       "Force quit join",
 		failedCnt: 0,

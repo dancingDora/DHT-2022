@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"os"
 	"time"
@@ -10,19 +12,31 @@ import (
 var (
 	help     bool
 	testName string
+	f        *os.File
 )
 
 func init() {
-	flag.BoolVar(&help, "help", false, "help")
-	flag.StringVar(&testName, "test", "", "which test(s) do you want to run: basic/advance/all")
+	/*
+		flag.BoolVar(&help, "help", false, "help")
+		flag.StringVar(&testName, "test", "", "which test(s) do you want to run: basic/advance/all")
 
-	flag.Usage = usage
-	flag.Parse()
+		flag.Usage = usage
+		flag.Parse()
 
-	if help || (testName != "basic" && testName != "advance" && testName != "all") {
-		flag.Usage()
-		os.Exit(0)
+		if help || (testName != "basic" && testName != "advance" && testName != "all") {
+			flag.Usage()
+			os.Exit(0)
+		}
+
+		rand.Seed(time.Now().UnixNano())
+	*/
+	testName = "all"
+	var err error
+	f, err = os.Create("log.txt")
+	if err != nil {
+		fmt.Println("fail to open log file")
 	}
+	log.SetOutput(f)
 
 	rand.Seed(time.Now().UnixNano())
 }

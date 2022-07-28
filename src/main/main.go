@@ -37,7 +37,6 @@ func init() {
 		fmt.Println("fail to open log file")
 	}
 	log.SetOutput(f)
-
 	rand.Seed(time.Now().UnixNano())
 }
 

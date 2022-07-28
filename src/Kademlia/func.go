@@ -1,191 +1,293 @@
-package Kademlia
+package kademlia
 
 import (
-	"container/list"
-	log "github.com/sirupsen/logrus"
-	"sync"
+	"crypto/sha1"
+	"errors"
+	"math/big"
+	"net"
+	"net/rpc"
 	"time"
 )
 
-const ()
+const M int = 160
+const K int = 10
+const ExpiredTime = 960 * time.Second
+const NeedRepublicTime = 120 * time.Second
+const waitTime = 250 * time.Millisecond
+const RepublishINterval = 100 * time.Millisecond
+const RemoteTryTime = 3
+const RemoteTryInterval = 25 * time.Millisecond
 
-type database struct {
-	rwLock        sync.RWMutex
-	dataset       map[string]string
-	expireTime    map[string]time.Time
-	duplicateTime map[string]time.Time
-	republicTime  map[string]time.Time
-	privilege     map[string]int
+var Mod = big.NewInt(0).Exp(big.NewInt(2), big.NewInt(int64(M)), nil)
+var localAddress string
+
+func init() {
+	localAddress = GetLocalAddress()
 }
 
-func (this *database) init() {
-	this.dataset = make(map[string]string)
-	this.expireTime = make(map[string]time.Time)
-	this.duplicateTime = make(map[string]time.Time)
-	this.republicTime = make(map[string]time.Time)
-	this.privilege = make(map[string]int)
-}
+func GetLocalAddress() string {
+	var localaddress string
 
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		panic("init: failed to find network interfaces")
+	}
 
+	// find the first non-loopback interface with an IP address
+	for _, elt := range ifaces {
+		if elt.Flags&net.FlagLoopback == 0 && elt.Flags&net.FlagUp != 0 {
+			addrs, err := elt.Addrs()
+			if err != nil {
+				panic("init: failed to get addresses for network interface")
+			}
 
-func (this *database) store(request StoreRequest) {
-	this.rwLock.Lock()
-	defer this.rwLock.Unlock()
-	if _, ok := this.dataset[request.Key]; !ok {
-		requestPri := request.RequesterPri
-		this.privilege[request.Key] = request.RequesterPri
-		this.dataset[request.Key] = request.Value
-		if requestPri == 0 {
-			this.republicTime[request.Key] = time.Now().Add(republicTimeInterval)
-			return
-		}
-		if requestPri == 1 {
-			this.duplicateTime[request.Key] = time.Now().Add(duplicateTimeInterval)
-			this.expireTime[request.Key] = time.Now().Add(expireTimeInterval2)
-			return
-		}
-		if requestPri == 2 {
-			this.expireTime[request.Key] = time.Now().Add(expireTimeInterval3)
-			return
-		}
-		log.Errorf("<database store> Wrong privilege")
-	} else {
-		originPri := this.privilege[request.Key]
-		requestPri := request.RequesterPri
-		if originPri == 1 || requestPri >= originPri {
-			return
-		}
-		if requestPri == 0 {
-			this.privilege[request.Key] = 1
-			this.dataset[request.Key] = request.Value
-			this.republicTime[request.Key] = time.Now().Add(republicTimeInterval)
-			delete(this.expireTime, request.Key)
-			delete(this.duplicateTime, request.Key)
-			return
-		} else if requestPri == 1 {
-			this.privilege[request.Key] = 2
-			this.dataset[request.Key] = request.Value
-			this.expireTime[request.Key] = time.Now().Add(expireTimeInterval2)
-			this.duplicateTime[request.Key] = time.Now().Add(duplicateTimeInterval)
-			delete(this.republicTime, request.Key)
-			return
-		} else if requestPri == 2 {
-			this.privilege[request.Key] = 3
-			this.dataset[request.Key] = request.Value
-			this.expireTime[request.Key] = time.Now().Add(expireTimeInterval3)
-			delete(this.duplicateTime, request.Key)
-			delete(this.republicTime, request.Key)
-			return
-		}
-		log.Errorln("<database store> Wrong privilege2")
-	}
-}
-
-func (this *database) expire() {
-	tmp := make(map[string]bool)
-	this.rwLock.RLock()
-	for k, v := range this.expireTime {
-		if !v.After(time.Now()) {
-			tmp[k] = true
-		}
-	}
-	this.rwLock.RUnlock()
-	this.rwLock.Lock()
-	for k, _ := range tmp {
-		delete(this.dataset, k)
-		delete(this.expireTime, k)
-		delete(this.duplicateTime, k)
-		delete(this.republicTime, k)
-		delete(this.privilege, k)
-	}
-	this.rwLock.Unlock()
-}
-
-func (this *database) duplicate() (result map[string]string) {
-	result = make(map[string]string)
-	this.rwLock.RLock()
-	for k, v := range this.duplicateTime {
-		if !v.After(time.Now()) {
-			result[k] = this.dataset[k]
-		}
-	}
-	this.rwLock.RUnlock()
-	this.rwLock.Lock()
-	for k, _ := range result {
-		this.duplicateTime[k] = time.Now().Add(duplicateTimeInterval)
-	}
-	this.rwLock.Unlock()
-	return
-}
-
-func (this *database) republic() (result map[string]string){
-	result = make(map[string]string)
-	this.rwLock.RLock()
-	for k, v := range this.republicTime {
-		if !v.After(time.Now()) {
-			result[k] = this.dataset[k]
-		}
-	}
-	this.rwLock.RUnlock()
-	this.rwLock.Lock()
-	for k, _ := range result {
-		this.republicTime[k] = time.Now().Add(republicTimeInterval)
-	}
-	this.rwLock.Unlock()
-	return
-}
-
-func (this *database) get(key string) (bool, string) {
-	this.rwLock.Lock()
-	defer this.rwLock.Unlock()
-	if v, ok := this.dataset[key]; ok {
-		if _, ok2 := this.expireTime[key]; ok2 {
-			if !this.expireTime[key].After(time.Now().Add(expireTimeInterval3)) {
-				this.expireTime[key] = time.Now().Add(expireTimeInterval3)
+			for _, addr := range addrs {
+				ipnet, ok := addr.(*net.IPNet)
+				if ok {
+					if ip4 := ipnet.IP.To4(); len(ip4) == net.IPv4len {
+						localaddress = ip4.String()
+						break
+					}
+				}
 			}
 		}
-		return true, v
+	}
+	if localaddress == "" {
+		panic("init: failed to find non-loopback interface with valid address on this node")
+	}
+
+	return localaddress
+}
+
+func Hash(str string) big.Int {
+	hasher := sha1.New()
+	hasher.Write([]byte(str))
+	var ret big.Int
+	ret.SetBytes(hasher.Sum(nil))
+	ret.Mod(&ret, Mod)
+	return ret
+}
+
+//for kBucketTYpe
+func (this *KBucket) Reflesh() {
+	for i := 0; i < this.size; i++ {
+		if Ping(this.bucket[i].Ip) != nil {
+			for j := i + 1; j < this.size; j++ {
+				this.bucket[j-1] = this.bucket[j]
+			}
+			this.size--
+			return
+		}
+	}
+}
+
+func (this *KBucket) Update(addr Addr) {
+	this.mux.Lock()
+	defer this.mux.Unlock()
+	if addr.Ip == "" {
+		return
+	}
+	pos := -1
+	for i := 0; i < this.size; i++ {
+		if this.bucket[i].Ip == addr.Ip {
+			pos = i
+			break
+		}
+	}
+	if pos == -1 {
+		if this.size < K {
+			this.size++
+			this.bucket[this.size-1] = addr
+			return
+		} else {
+			if Ping(this.bucket[0].Ip) == nil {
+				head := this.bucket[0]
+				for i := 1; i < K; i++ {
+					this.bucket[i-1] = this.bucket[i]
+				}
+				this.bucket[K-1] = head
+				return
+			} else {
+				//bucket[0] is offline
+				for i := 1; i < K; i++ {
+					this.bucket[i-1] = this.bucket[i]
+				}
+				this.bucket[K-1] = addr
+				return
+			}
+		}
 	} else {
-		return false, ""
-	}
-}
-
-type RoutingTable struct {
-	nodeAddr       Contact
-	rwLock         sync.RWMutex
-	buckets        [160]*list.List
-	refreshIndex   int
-	refreshTimeSet [160]time.Time
-}
-
-func (this *RoutingTable) InitRoutingTable(nodeAddr Contact) {
-	this.nodeAddr = nodeAddr
-	this.rwLock.Lock()
-	for i := 0; i < 160; i++ {
-		this.buckets[i] = list.New()
-		this.refreshTimeSet[i] = time.Now()
-	}
-	this.refreshIndex = 0
-	this.rwLock.Unlock()
-}
-
-func (this *RoutingTable) Update(contact *Contact) {
-	this.rwLock.RLock()
-	bucket := this.buckets[PrefixLen(Xor(this.nodeAddr.NodeID, contact.NodeID))]
-	target := bucket.Front()
-	target = nil
-	for i := bucket.Front(); ; i = i.Next() {
-		if i == nil {
-			target = nil
-			break
+		for i := pos + 1; i < this.size; i++ {
+			this.bucket[i-1] = this.bucket[i]
 		}
-		if i.Value.(*Contact).NodeID.Equals(contact.NodeID) {
-			target = i
-			break
+		this.bucket[this.size-1] = addr
+	}
+}
+
+//for closetlist:
+func (this *ClosestList) Insert(addr Addr) bool {
+	res := false
+	if Ping(addr.Ip) != nil {
+		return res
+	}
+	for i := 0; i < this.Size; i++ {
+		if this.List[i].Ip == addr.Ip {
+			return res
 		}
 	}
-	this.rwLock.RUnlock()
-	this.rwLock.Lock()
-	if target
+	newDis := dis(&this.Standard, &addr.Id)
+	if this.Size < K {
+		res = true
+		for i := 0; i < this.Size; i++ {
+			tmpDis := dis(&this.List[i].Id, &this.Standard)
+			if newDis.Cmp(&tmpDis) < 0 {
+				this.Size++
+				for j := this.Size - 1; j > i; j-- {
+					this.List[j] = this.List[j-1]
+				}
+				this.List[i] = addr
+				return res
+			}
+		}
+		this.Size++
+		this.List[this.Size-1] = addr
+		return res
+	} else {
+		for i := 0; i < K; i++ {
+			tmpDis := dis(&this.List[i].Id, &this.Standard)
+			if newDis.Cmp(&tmpDis) < 0 {
+				res = true
+				for j := K - 1; j > i; j-- {
+					this.List[j] = this.List[j-1]
+				}
+				this.List[i] = addr
+				return res
+			}
+		}
+		return res
+	}
+}
 
+func (this *ClosestList) Remove(addr Addr) bool {
+	for i := 0; i < this.Size; i++ {
+		if this.List[i].Ip == addr.Ip {
+			this.Size--
+			for j := i; j < this.Size; j++ {
+				this.List[j] = this.List[j+1]
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func Ping(addr string) error {
+	var ret *rpc.Client
+	var err error
+	if addr == "" {
+		return errors.New("[error] Empty IP addr")
+	}
+	for i := 0; i < RemoteTryTime; i++ {
+		ret, err = rpc.Dial("tcp", addr)
+		if err == nil {
+			ret.Close()
+			return err
+		}
+		time.Sleep(RemoteTryInterval)
+	}
+	return err
+}
+
+func Diag(addr string) (*rpc.Client, error) {
+	var ret *rpc.Client
+	var err error
+	if addr == "" {
+		return nil, errors.New("ERROR: empty IP addr")
+	}
+	for i := 0; i < RemoteTryTime; i++ {
+		ret, err = rpc.Dial("tcp", addr)
+		if err == nil {
+			return ret, err
+		}
+		time.Sleep(RemoteTryInterval)
+	}
+	return nil, err
+}
+
+//for big.Int
+func dis(x, y *big.Int) big.Int {
+	var res big.Int
+	res.Xor(x, y)
+	return res
+}
+func cpl(x, y *big.Int) int {
+	Xdis := dis(x, y)
+	return Xdis.BitLen() - 1
+}
+
+//for dataType
+func (this *Data) GetRePublishList() (republishList []string) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	for key, tim := range this.republishTime {
+		if time.Now().After(tim) {
+			republishList = append(republishList, key)
+		}
+	}
+	return republishList
+}
+
+func (this *Data) DeleteExpiredData() {
+	var expiredList []string
+	this.lock.RLock()
+	for key, tim := range this.validTime {
+		if time.Now().After(tim) {
+			expiredList = append(expiredList, key)
+		}
+	}
+	this.lock.RUnlock()
+	this.lock.Lock()
+	for _, key := range expiredList {
+		delete(this.hashMap, key)
+		delete(this.validTime, key)
+		delete(this.republishTime, key)
+	}
+	this.lock.Unlock()
+}
+
+func (this *Data) AddPair(key string, value string) {
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	this.hashMap[key] = value
+	this.validTime[key] = time.Now().Add(ExpiredTime)
+	this.republishTime[key] = time.Now().Add(NeedRepublicTime)
+}
+
+func (this *Data) GetValue(key string) (founded bool, res string) {
+	this.lock.RLock()
+	defer this.lock.RUnlock()
+	res, founded = this.hashMap[key]
+	return founded, res
+}
+
+func (this *Data) SubPair(key string) (founded bool) {
+	this.lock.Lock()
+	this.lock.Unlock()
+	_, founded = this.hashMap[key]
+	if founded {
+		delete(this.hashMap, key)
+		delete(this.republishTime, key)
+		delete(this.validTime, key)
+	}
+	return founded
+}
+
+func (this *Data) CopyData() map[string]string {
+	res := make(map[string]string)
+	this.lock.Lock()
+	defer this.lock.Unlock()
+	for key, value := range this.hashMap {
+		res[key] = value
+	}
+	return res
 }

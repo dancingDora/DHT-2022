@@ -10,12 +10,12 @@ import (
 func basicTest() (bool, int, int) {
 	basicFailedCnt, basicTotalCnt, panicked := 0, 0, false
 
-	defer func() {
-		if r := recover(); r != nil {
-			_, _ = red.Println("Program panicked with", r)
-		}
-		panicked = true
-	}()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		_, _ = red.Println("Program panicked with", r)
+	//	}
+	//	panicked = true
+	//}()
 
 	nodes := new([basicTestNodeSize + 1]dhtNode)
 	nodeAddresses := new([basicTestNodeSize + 1]string)

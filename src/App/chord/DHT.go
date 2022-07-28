@@ -60,7 +60,6 @@ func (this *Node) Run() {
 		log.Errorln("<Run> failed ", err)
 		return
 	}
-	//log.Infoln("<Run> success in ", this.address)
 	this.conRoutineFlag = true
 	this.next = 1
 }
@@ -224,7 +223,6 @@ func (this *Node) fix_finger() {
 		this.next = 1
 	}
 	this.rwLock.Unlock()
-	//log.Infoln("<fix_finger> fix successfully in ", this.address)
 }
 
 func (this *Node) Join(addr string) bool {
@@ -238,7 +236,6 @@ func (this *Node) Join(addr string) bool {
 		log.Errorln("<Join> Fail to Join ,Error msg: ", err)
 		return false
 	}
-	//log.Infoln("<Join> Get Successor and Join Successfully ")
 	var temp [SuccessorListSize]string
 	err = RemoteCall(sucAddr, "NodeWrapper.SetSuccessorList", 2022, &temp)
 	if err != nil {
@@ -288,7 +285,6 @@ func (this *Node) Quit() {
 		log.Errorln("<Quit.Stabilize> Error : ", err)
 	}
 	this.reset()
-	//log.Infoln("<Quit> ", this.address, " Quit Successfully")
 }
 
 func (this *Node) ForceQuit() {
@@ -300,7 +296,6 @@ func (this *Node) ForceQuit() {
 	this.conRoutineFlag = false
 	this.rwLock.Unlock()
 	this.reset()
-	//log.Infoln("<ForceQuit> ", this.address, " Quit Successfully")
 }
 
 func (this *Node) Ping(addr string) bool {
@@ -325,7 +320,6 @@ func (this *Node) Put(key string, value string) bool {
 		log.Errorln("<Put> Put Data into ", targetAddr, " successfully")
 		return false
 	}
-	//log.Infoln("<Put> Put Data into ", targetAddr, " successfully")
 	return true
 }
 
@@ -342,7 +336,6 @@ func (this *Node) Get(key string) (bool, string) {
 		return false, ""
 	}
 	err = RemoteCall(targetAddr, "NodeWrapper.GetData", key, &value)
-	//log.Infoln("<Get> Get Data from ", targetAddr, " successfully,")
 	return true, value
 }
 
@@ -363,7 +356,6 @@ func (this *Node) Delete(key string) bool {
 		log.Errorln("<Delete> Fail to Delete Data from Target Node in ", targetAddr, " error : ", err)
 		return false
 	}
-	//log.Infoln("<Delete> Delete Data from ", targetAddr, " successfully")
 	return true
 }
 
@@ -394,7 +386,6 @@ func (this *Node) notify(instructor string) error {
 		if err != nil {
 			log.Errorln("<notify> Fail to get backup from predecessor ", instructor, " because ", err)
 		}
-		//log.Infoln("<notify> Change ", this.address, " Predecessor to ", instructor)
 	}
 	return nil
 }
@@ -457,7 +448,6 @@ func (this *Node) hereditary_data(predeAddr string, dataSet *map[string]string) 
 	this.rwLock.Lock()
 	this.predecessor = predeAddr
 	this.rwLock.Unlock()
-	//log.Infoln("<hereditary_data> Successfully pass data from ", this.address)
 	return nil
 }
 
@@ -467,7 +457,6 @@ func (this *Node) inherit_data(dataSet *map[string]string) error {
 		this.dataSet[k] = v
 	}
 	this.dataLock.Unlock()
-	//log.Infoln("<inherit_data> Successfully pass data to ", this.address)
 	return nil
 }
 

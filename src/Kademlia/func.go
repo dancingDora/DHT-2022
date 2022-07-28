@@ -10,10 +10,12 @@ import (
 )
 
 const M int = 160
-const K int = 10
+const K int = 15
+const Alpha int = 3
 const ExpiredTime = 960 * time.Second
 const NeedRepublicTime = 120 * time.Second
 const waitTime = 250 * time.Millisecond
+const UpdateInterval = 25 * time.Millisecond
 const RepublishINterval = 100 * time.Millisecond
 const RemoteTryTime = 3
 const RemoteTryInterval = 25 * time.Millisecond
@@ -69,7 +71,7 @@ func Hash(str string) big.Int {
 }
 
 //for kBucketTYpe
-func (this *KBucket) Reflesh() {
+func (this *KBucketType) Reflesh() {
 	for i := 0; i < this.size; i++ {
 		if Ping(this.bucket[i].Ip) != nil {
 			for j := i + 1; j < this.size; j++ {
@@ -81,7 +83,7 @@ func (this *KBucket) Reflesh() {
 	}
 }
 
-func (this *KBucket) Update(addr Addr) {
+func (this *KBucketType) Update(addr AddrType) {
 	this.mux.Lock()
 	defer this.mux.Unlock()
 	if addr.Ip == "" {
@@ -101,6 +103,7 @@ func (this *KBucket) Update(addr Addr) {
 			return
 		} else {
 			if Ping(this.bucket[0].Ip) == nil {
+				//bucket[0] is online
 				head := this.bucket[0]
 				for i := 1; i < K; i++ {
 					this.bucket[i-1] = this.bucket[i]
@@ -125,7 +128,7 @@ func (this *KBucket) Update(addr Addr) {
 }
 
 //for closetlist:
-func (this *ClosestList) Insert(addr Addr) bool {
+func (this *ClosestList) Insert(addr AddrType) bool {
 	res := false
 	if Ping(addr.Ip) != nil {
 		return res
@@ -168,7 +171,7 @@ func (this *ClosestList) Insert(addr Addr) bool {
 	}
 }
 
-func (this *ClosestList) Remove(addr Addr) bool {
+func (this *ClosestList) Remove(addr AddrType) bool {
 	for i := 0; i < this.Size; i++ {
 		if this.List[i].Ip == addr.Ip {
 			this.Size--
@@ -226,18 +229,19 @@ func cpl(x, y *big.Int) int {
 }
 
 //for dataType
-func (this *Data) GetRePublishList() (republishList []string) {
+func (this *DataType) GetRePublishList() (republishList []string) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	for key, tim := range this.republishTime {
 		if time.Now().After(tim) {
 			republishList = append(republishList, key)
+			this.republishTime[key] = time.Now().Add(NeedRepublicTime)
 		}
 	}
 	return republishList
 }
 
-func (this *Data) DeleteExpiredData() {
+func (this *DataType) DeleteExpiredData() {
 	var expiredList []string
 	this.lock.RLock()
 	for key, tim := range this.validTime {
@@ -255,7 +259,7 @@ func (this *Data) DeleteExpiredData() {
 	this.lock.Unlock()
 }
 
-func (this *Data) AddPair(key string, value string) {
+func (this *DataType) AddPair(key string, value string) {
 	this.lock.Lock()
 	defer this.lock.Unlock()
 	this.hashMap[key] = value
@@ -263,14 +267,14 @@ func (this *Data) AddPair(key string, value string) {
 	this.republishTime[key] = time.Now().Add(NeedRepublicTime)
 }
 
-func (this *Data) GetValue(key string) (founded bool, res string) {
+func (this *DataType) GetValue(key string) (founded bool, res string) {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 	res, founded = this.hashMap[key]
 	return founded, res
 }
 
-func (this *Data) SubPair(key string) (founded bool) {
+func (this *DataType) SubPair(key string) (founded bool) {
 	this.lock.Lock()
 	this.lock.Unlock()
 	_, founded = this.hashMap[key]
@@ -282,7 +286,7 @@ func (this *Data) SubPair(key string) (founded bool) {
 	return founded
 }
 
-func (this *Data) CopyData() map[string]string {
+func (this *DataType) CopyData() map[string]string {
 	res := make(map[string]string)
 	this.lock.Lock()
 	defer this.lock.Unlock()

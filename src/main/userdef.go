@@ -10,7 +10,7 @@ import (
 
 func NewNode(port int) dhtNode {
 	// Todo: create a node and then return it.
-	NODE := new(kademlia.Node)
+	NODE := new(kademlia.KadNode)
 	NODE.Init(port)
 	return NODE
 

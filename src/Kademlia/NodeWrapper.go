@@ -1,7 +1,7 @@
 package kademlia
 
 type WrapNode struct {
-	node *Node
+	node *KadNode
 }
 
 func (this *WrapNode) FindNode(input *FindNodeArg, res *ClosestList) error {

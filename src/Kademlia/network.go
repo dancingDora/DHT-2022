@@ -15,7 +15,7 @@ type network struct {
 	QuitSignal chan bool
 }
 
-func Accept(ser *rpc.Server, lis net.Listener, ptr *Node) {
+func Accept(ser *rpc.Server, lis net.Listener, ptr *KadNode) {
 	for {
 		//always run
 		conn, tmp_err := lis.Accept()
@@ -32,7 +32,7 @@ func Accept(ser *rpc.Server, lis net.Listener, ptr *Node) {
 	}
 }
 
-func (this *network) Init(address string, ptr *Node) error {
+func (this *network) Init(address string, ptr *KadNode) error {
 	this.serv = rpc.NewServer()
 	this.nodePtr = new(WrapNode)
 	this.nodePtr.node = ptr

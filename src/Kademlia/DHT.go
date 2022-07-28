@@ -15,24 +15,24 @@ type Pair struct {
 	Value string
 }
 
-type Addr struct {
+type AddrType struct {
 	Ip string
 	Id big.Int
 }
 
-func (this *Addr) addr_init(port int) {
+func (this *AddrType) addr_init(port int) {
 	this.Ip = fmt.Sprintf("%s:%d", localAddress, port)
 	this.Id = Hash(this.Ip)
 }
 
-type Data struct {
+type DataType struct {
 	hashMap       map[string]string
 	validTime     map[string]time.Time
 	republishTime map[string]time.Time
 	lock          sync.RWMutex
 }
 
-func (this *Data) Init() {
+func (this *DataType) data_init() {
 	this.hashMap = make(map[string]string)
 	this.validTime = make(map[string]time.Time)
 	this.republishTime = make(map[string]time.Time)
@@ -41,39 +41,39 @@ func (this *Data) Init() {
 type ClosestList struct {
 	Size     int
 	Standard big.Int
-	List     [K]Addr
+	List     [K]AddrType
 }
 
-type KBucket struct {
+type KBucketType struct {
 	size   int
-	bucket [K]Addr
+	bucket [K]AddrType
 	mux    sync.Mutex
 }
 
-type Node struct {
-	address        Addr
-	data           Data
+type KadNode struct {
+	address        AddrType
+	data           DataType
 	station        *network
 	conRoutineFlag bool
-	routeTable     [M]KBucket
+	routeTable     [M]KBucketType
 	mux            sync.RWMutex
 }
 
 type FindNodeArg struct {
 	TarID  big.Int
-	Sender Addr
+	Sender AddrType
 }
 
 type FindValueArg struct {
 	Key    string
 	Hash   big.Int
-	Sender Addr
+	Sender AddrType
 }
 
 type StoreArg struct {
 	Key    string
 	Value  string
-	Sender Addr
+	Sender AddrType
 }
 
 type FindValueRet struct {
@@ -81,12 +81,12 @@ type FindValueRet struct {
 	Second string
 }
 
-func (this *Node) Init(port int) {
+func (this *KadNode) Init(port int) {
 	this.address.addr_init(port)
 	this.reset()
 }
 
-func (this *Node) Run() {
+func (this *KadNode) Run() {
 	this.station = new(network)
 	tmp_err := this.station.Init(this.address.Ip, this)
 	if tmp_err != nil {
@@ -99,8 +99,8 @@ func (this *Node) Run() {
 	}
 }
 
-func (this *Node) Join(ip string) bool {
-	tmpAddr := Addr{ip, Hash(ip)}
+func (this *KadNode) Join(ip string) bool {
+	tmpAddr := AddrType{ip, Hash(ip)}
 	this.kBucketUpdate(tmpAddr)
 	client, tmp_err := Diag(ip)
 	if tmp_err != nil {
@@ -135,12 +135,35 @@ func (this *Node) Join(ip string) bool {
 	return true
 }
 
-func (this *Node) Ping(addr string) bool {
+func (this *KadNode) Ping(addr string) bool {
 	isOnline := CheckOnline(addr)
 	return isOnline
 }
 
-func (this *Node) Put(key string, value string) bool {
+func (this *KadNode) Put(key string, value string) bool {
+	log.Infoln("In Put begin the time is", time.Now())
+	keyID := Hash(key)
+	closestList := this.NodeLookup(&keyID)
+	closestList.Insert(this.address)
+	for i := 0; i < closestList.Size; i++ {
+		client, tmp_err := Diag(closestList.List[i].Ip)
+		if tmp_err != nil {
+			log.Errorln("[Error] in function Put can not diag node aimIp", closestList.List[i].Ip, "because", tmp_err)
+		} else {
+			var o string
+			tmp_err = client.Call("WrapNode.AddPair", &StoreArg{key, value, this.address}, &o)
+			if tmp_err != nil {
+				log.Errorln("[Error] can not call addpair because", tmp_err)
+			}
+			client.Close()
+		}
+	}
+	log.Infoln("In Put end the time is", time.Now())
+	return true
+}
+
+func (this *KadNode) aPut(key string, value string) bool {
+	//log.Infoln("In RePut begin the time is", time.Now())
 	keyID := Hash(key)
 	closestList := this.NodeLookup(&keyID)
 	closestList.Insert(this.address)
@@ -157,10 +180,13 @@ func (this *Node) Put(key string, value string) bool {
 			client.Close()
 		}
 	}
+	//log.Infoln("In RePut end the time is", time.Now())
 	return true
 }
 
-func (this *Node) Get(key string) (bool, string) {
+func (this *KadNode) Get(key string) (bool, string) {
+	log.Infoln("Function Get begin in", time.Now())
+	defer log.Infoln("Function Get end in", time.Now())
 	keyID := Hash(key)
 	isDiaged := make(map[string]bool)
 	finfValueRes := this.FindValue(key, &keyID)
@@ -172,9 +198,9 @@ func (this *Node) Get(key string) (bool, string) {
 	for isUpdated {
 		isUpdated = false
 		var tmp ClosestList
-		var removeList []Addr
+		var removeList []AddrType
 		for i := 0; i < closestlist.Size; i++ {
-			if isDiaged[closestlist.List[i].Ip] == true {
+			if closestlist.List[i].Ip == "" || isDiaged[closestlist.List[i].Ip] == true {
 				continue
 			}
 			client, tmp_err := Diag(closestlist.List[i].Ip)
@@ -207,6 +233,7 @@ func (this *Node) Get(key string) (bool, string) {
 		client, tmp_err := Diag(aimAddr.Ip)
 		if tmp_err != nil {
 			log.Errorln("[Error] in function Get can not diag", aimAddr.Ip, "because", tmp_err)
+			continue
 		}
 		defer client.Close()
 		var res FindValueRet
@@ -218,7 +245,11 @@ func (this *Node) Get(key string) (bool, string) {
 	return false, ""
 }
 
-func (this *Node) FindNode(tarID *big.Int) (closestList ClosestList) {
+func (this *KadNode) FindNode(tarID *big.Int) (closestList ClosestList) {
+	if tarID == nil {
+		log.Errorln("[Error] in function FindNode tarID is nil")
+		return
+	}
 	this.mux.RLock()
 	defer this.mux.RUnlock()
 	closestList.Standard = *tarID
@@ -232,25 +263,33 @@ func (this *Node) FindNode(tarID *big.Int) (closestList ClosestList) {
 	return
 }
 
-func (this *Node) FindValue(key string, hash *big.Int) FindValueRet {
+func (this *KadNode) FindValue(key string, hash *big.Int) FindValueRet {
+	//firstly find in node "this" then find it in other nodes
 	this.mux.RLock()
 	defer this.mux.RUnlock()
 	founded, value := this.data.GetValue(key)
 	if founded {
 		return FindValueRet{ClosestList{}, value}
 	}
-	retClosest := ClosestList{Standard: *hash}
-	for i := 0; i < M; i++ {
-		for j := 0; j < this.routeTable[i].size; j++ {
-			if Ping(this.routeTable[i].bucket[j].Ip) == nil { //if online
-				retClosest.Insert(this.routeTable[i].bucket[j])
+	var retClosest ClosestList
+	if hash != nil {
+		retClosest = ClosestList{Standard: *hash}
+		for i := 0; i < M; i++ {
+			for j := 0; j < this.routeTable[i].size; j++ {
+				if Ping(this.routeTable[i].bucket[j].Ip) == nil { //if online
+					retClosest.Insert(this.routeTable[i].bucket[j])
+				}
 			}
 		}
 	}
 	return FindValueRet{retClosest, ""}
 }
 
-func (this *Node) NodeLookup(tarID *big.Int) (closestList ClosestList) {
+func (this *KadNode) NodeLookup(tarID *big.Int) (closestList ClosestList) {
+	if tarID == nil {
+		log.Errorln("[Error] the bigInt is nil")
+		return
+	}
 	closestList = this.FindNode(tarID)
 	closestList.Insert(this.address)
 	isUpdate := true
@@ -258,7 +297,7 @@ func (this *Node) NodeLookup(tarID *big.Int) (closestList ClosestList) {
 	for isUpdate {
 		isUpdate = false
 		var tmp ClosestList
-		var removeList []Addr
+		var removeList []AddrType
 		for i := 0; i < closestList.Size; i++ {
 			if diaged[closestList.List[i].Ip] == true {
 				continue
@@ -282,15 +321,15 @@ func (this *Node) NodeLookup(tarID *big.Int) (closestList ClosestList) {
 			closestList.Remove(key)
 		}
 		for i := 0; i < tmp.Size; i++ {
-			//todo:can be simplified
 			isUpdate = isUpdate || closestList.Insert(tmp.List[i])
 		}
 	}
 	return
 }
 
-func (this *Node) RePublish() {
+func (this *KadNode) RePublish() {
 	for this.conRoutineFlag {
+		//log.Infoln("Begin Republish", time.Now())
 		for i := 0; i < M; i++ {
 			this.routeTable[i].Reflesh()
 		}
@@ -299,19 +338,21 @@ func (this *Node) RePublish() {
 		republishList := this.data.GetRePublishList()
 		this.mux.Unlock()
 		for _, key := range republishList {
-			this.Put(key, copyData[key])
+			this.aPut(key, copyData[key])
 		}
 		this.data.DeleteExpiredData()
+		//log.Infoln("End Republish", time.Now())
 		time.Sleep(RepublishINterval)
 	}
 }
 
-func (this *Node) reset() {
+//private functions:
+func (this *KadNode) reset() {
 	this.conRoutineFlag = false
-	this.data.Init()
+	this.data.data_init()
 }
 
-func (this *Node) kBucketUpdate(addr Addr) {
+func (this *KadNode) kBucketUpdate(addr AddrType) {
 	this.mux.Lock()
 	defer this.mux.Unlock()
 	if addr.Ip == "" || addr.Ip == this.address.Ip {
@@ -320,19 +361,19 @@ func (this *Node) kBucketUpdate(addr Addr) {
 	this.routeTable[cpl(&this.address.Id, &addr.Id)].Update(addr)
 }
 
-func (this *Node) Create() {
+//none used function
+func (this *KadNode) Create() {
 	return
 }
-func (this *Node) Quit() {
+func (this *KadNode) Quit() {
+	this.station.ShutDown()
+	this.reset()
+}
+func (this *KadNode) ForceQuit() {
 	this.station.ShutDown()
 	this.reset()
 }
 
-func (this *Node) ForceQuit() {
-	this.station.ShutDown()
-	this.reset()
-}
-
-func (this *Node) Delete(key string) bool {
+func (this *KadNode) Delete(key string) bool {
 	return true
 }
